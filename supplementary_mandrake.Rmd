@@ -18,7 +18,7 @@ library(tidyverse)
 
 ## *Streptococcus pneumoniae*
 
-To generate an accessory gene presence/absence matrix we ran Panaroo v1.2 on a cleaned subset of 20,037 genome assemblies from the Global pneumococcal sequencing project. Panaroo was run on each Global Pneumococcal Sequencing Cluster (GPSC) seperately and the resulting graphs were merged.
+To generate an accessory gene presence/absence matrix we ran Panaroo v1.2 on a cleaned subset of 20,037 genome assemblies from the Global pneumococcal sequencing project. Panaroo was run on each Global Pneumococcal Sequencing Cluster (GPSC) separately and the resulting graphs were merged.
 
 ```
 for gpsc in *
@@ -48,6 +48,12 @@ palette(c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928",
 plot(gps_embedding$V1, gps_embedding$V2, type = 'p', 
      cex=0.05, cex.axis=1.5, font=1.5, col=ppunk_clsts, 
      xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+
+jpeg('./figures/gps_embedding.jpeg', width = 1200, height = 1000)
+plot(gps_embedding$V1, gps_embedding$V2, type = 'p', 
+     cex=0.05, cex.axis=1.5, font=1.5, col=ppunk_clsts, 
+     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+dev.off()
 ```
 
 
@@ -87,4 +93,10 @@ palette(c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928",
 plot(sc2_embedding$V1, sc2_embedding$V2, type = 'p', 
      cex=0.01, cex.axis=1.5, font=1.5, #col=ppunk_clsts, 
      xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+
+jpeg('./figures/sc2_embedding.jpeg', width = 1200, height = 1000)
+plot(sc2_embedding$V1, sc2_embedding$V2, type = 'p', 
+     cex=0.01, cex.axis=1.5, font=1.5, #col=ppunk_clsts, 
+     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+dev.off()
 ```
