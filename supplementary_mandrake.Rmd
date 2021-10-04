@@ -1,0 +1,90 @@
+---
+title: "Supplementary Text - Mandrake"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries we are going to use.
+
+```{r}
+library(data.table)
+library(tidyverse)
+```
+
+## *Streptococcus pneumoniae*
+
+To generate an accessory gene presence/absence matrix we ran Panaroo v1.2 on a cleaned subset of 20,037 genome assemblies from the Global pneumococcal sequencing project. Panaroo was run on each Global Pneumococcal Sequencing Cluster (GPSC) seperately and the resulting graphs were merged.
+
+```
+for gpsc in *
+do
+panaroo -i ./${gpsc}/*.gff -o ./${gpsc}/panaroo_out -t 10 --clean-mode sensitive
+done
+
+panaroo-merge -d ./*/panaroo_out -o panaroo_merge -t 20
+```
+
+Mandrake was run on the resulting gene presence/absence matrix
+
+```
+mandrake --cpus 60 --accessory gene_presence_absence.Rtab --output gps_panaroo --kNN 50 --perplexity 15 --bInit 0 --maxIter 1000000000
+```
+
+We can now generate a plot of the embedding coloured by the corresponding Poppunk clusters.
+
+```{r}
+gps_embedding <- fread("./data/gps_panaroo.embedding.txt.gz") %>% as_tibble()
+gpsnames <- fread("./data/gps_panaroo.names.txt.gz", header = FALSE, sep='\t') %>% as_tibble()
+
+ppunk_clsts <- fread("./data/poppunk_clusters.tab.gz") %>% as_tibble()
+ppunk_clsts <- ppunk_clsts$V2[match(gpsnames$V1, gsub('\\.velvet', '', ppunk_clsts$V1))]
+
+palette(c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a"))
+plot(gps_embedding$V1, gps_embedding$V2, type = 'p', 
+     cex=0.05, cex.axis=1.5, font=1.5, col=ppunk_clsts, 
+     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+```
+
+
+## SARS-CoV-2
+
+
+Data was downloaded from the ENA. The resulting sequences were then filtered out if they had over 10% missing sites and were aligned to the SARS-CoV-2 reference genome (MN908947.3) using MAFFT (v7.487).
+
+```{python, eval=FALSE}
+import pyfastx
+
+MIN_LENGTH = 29903*0.9
+
+with open('filtered_SC2.fasta', 'w') as outfile:
+  for name, seq in pyfastx.Fasta('20210920-0733.fasta.gz', build_index=False):
+      if len(seq) < MIN_LENGTH: continue
+      if (seq.upper().count('N')/float(len(seq))) > 0.05: continue
+      o=outfile.write('>'+name+'\n'+seq+'\n')
+```
+
+```
+mafft --6merpair --thread -1 --keeplength --addfragments filtered_SC2.fasta nCoV-2019.reference.fasta > MA_filt_SC2.fasta
+```
+
+Mandrake was run using the command
+
+```
+mandrake --cpus 60 --alignment MA_filt_SC2.fasta --output sc2million_v3 --kNN 50 --perplexity 15 --bInit 0 --maxIter 10000000000
+```
+
+We can now generate a plot of the resulting embedding.
+
+```{r}
+sc2_embedding <- fread("./data/sc2million.embedding.txt.gz") %>% as_tibble()
+
+palette(c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a"))
+plot(sc2_embedding$V1, sc2_embedding$V2, type = 'p', 
+     cex=0.01, cex.axis=1.5, font=1.5, #col=ppunk_clsts, 
+     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+```
