@@ -14,9 +14,14 @@ Load libraries we are going to use.
 ```{r}
 library(data.table)
 library(tidyverse)
+library(dbscan)
+library(scales)
+library(ggthemes)
+
+colours <- c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a")
 ```
 
-## *Streptococcus pneumoniae*
+## Accessory gene matrix example - 20k *Streptococcus pneumoniae* genomes
 
 To generate an accessory gene presence/absence matrix we ran Panaroo v1.2 on a cleaned subset of 20,037 genome assemblies from the Global pneumococcal sequencing project. Panaroo was run on each Global Pneumococcal Sequencing Cluster (GPSC) separately and the resulting graphs were merged.
 
@@ -32,7 +37,7 @@ panaroo-merge -d ./*/panaroo_out -o panaroo_merge -t 20
 Mandrake was run on the resulting gene presence/absence matrix
 
 ```
-mandrake --cpus 60 --accessory gene_presence_absence.Rtab --output gps_panaroo --kNN 50 --perplexity 15 --bInit 0 --maxIter 1000000000
+mandrake --cpus 60 --accessory gene_presence_absence.Rtab --output gps_panaroo --kNN 50 --perplexity 15 --bInit 0 --maxIter 10000000000
 ```
 
 We can now generate a plot of the embedding coloured by the corresponding Poppunk clusters.
@@ -40,24 +45,94 @@ We can now generate a plot of the embedding coloured by the corresponding Poppun
 ```{r}
 gps_embedding <- fread("./data/gps_panaroo.embedding.txt.gz") %>% as_tibble()
 gpsnames <- fread("./data/gps_panaroo.names.txt.gz", header = FALSE, sep='\t') %>% as_tibble()
-
 ppunk_clsts <- fread("./data/poppunk_clusters.tab.gz") %>% as_tibble()
-ppunk_clsts <- ppunk_clsts$V2[match(gpsnames$V1, gsub('\\.velvet', '', ppunk_clsts$V1))]
 
-palette(c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a"))
-plot(gps_embedding$V1, gps_embedding$V2, type = 'p', 
-     cex=0.05, cex.axis=1.5, font=1.5, col=ppunk_clsts, 
-     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+gps_embedding$cluster <- factor(ppunk_clsts$V2[match(gpsnames$V1, gsub('\\.velvet', '', ppunk_clsts$V1))])
+ggplot(gps_embedding, aes(x=V1, y=V2, colour=cluster)) + 
+  geom_point(alpha=0.5, size=0.7) +
+  scale_colour_manual(values=rep(colours, 50)) +
+  theme_bw(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank(),
+        legend.position = 'none') +
+  xlab('SCE DIM 1') + ylab('SCE DIM 2')
 
-jpeg('./figures/gps_embedding.jpeg', width = 1200, height = 1000)
-plot(gps_embedding$V1, gps_embedding$V2, type = 'p', 
-     cex=0.05, cex.axis=1.5, font=1.5, col=ppunk_clsts, 
-     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
-dev.off()
+ggsave('./figures/gps_embedding.png', width = 9, height = 7)
+
+
+tb <- table(gps_embedding$cluster)
+gps_embedding$major_cluster <- as.character(gps_embedding$cluster)
+gps_embedding$major_cluster[gps_embedding$major_cluster %in% names(tb)[tb<50]] <- 'small'
+temp_colours <- rep(colours, 20)[1:length(unique(gps_embedding$major_cluster))]
+temp_colours[[length(temp_colours)]] <- '#bababa'
+
+ggplot(gps_embedding, aes(x=V1, y=V2, colour=major_cluster)) + 
+  geom_point(alpha=0.5, size=0.7) +
+  scale_colour_manual(values=temp_colours) +
+  theme_bw(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank(),
+        legend.position = 'none') +
+  xlab('SCE DIM 1') + ylab('SCE DIM 2')
+
+ggsave('./figures/gps_embedding_major_clusters_col.png', width = 9, height = 7)
 ```
 
 
-## SARS-CoV-2
+```{r, eval=FALSE}
+cl <- hdbscan(gps_embedding, minPts = 10)
+clust <- cl$cluster
+clust[clust==0] <- max(clust) + 1:sum(clust==0)
+rand_mandrake <- fossil::rand.index(clust, ppunk_clsts)
+
+#tSNE
+pa <- fread("./gene_presence_absence.Rtab") %>% as_tibble()
+names <- colnames(pa)[2:ncol(pa)]
+pa <- t(data.table(pa[,2:ncol(pa)]))
+pcadims <- 50
+perplexity <- 15
+
+pca <-irlba::prcomp_irlba(pa, n=pcadims)
+tsne_embedding <- Rtsne::Rtsne(X = pca$x, 
+                  check_duplicates=FALSE,
+                  pca = FALSE,
+                  perplexity = 10)
+
+cl_pca <- hdbscan(pca$x[match(gpsnames$V1, names),1:2], minPts = 10)
+clust <- cl_pca$cluster
+clust[clust==0] <- max(clust) + 1:sum(clust==0)
+rand_pca <- fossil::rand.index(cl_pca$cluster, ppunk_clsts)
+
+cl_tsne <- hdbscan(tsne_embedding$Y[match(gpsnames$V1, names),], minPts = 10)
+clust <- cl_tsne$cluster
+clust[clust==0] <- max(clust) + 1:sum(clust==0)
+rand_tsne <- fossil::rand.index(clust, ppunk_clsts)
+
+umap_embedding <- umap::umap(d = pca$x[match(gpsnames$V1, names),])
+cl_umap <- hdbscan(umap_embedding$layout, minPts = 10)
+clust <- cl_umap$cluster
+clust[clust==0] <- max(clust) + 1:sum(clust==0)
+rand_umap <- fossil::rand.index(clust, ppunk_clsts)
+
+pdf <- tibble(
+  method=c('mandrake', 'umap', 'tsne', 'pca'),
+  rand=c(rand_mandrake, rand_umap, rand_tsne, rand_pca)
+)
+
+ggplot(pdf, aes(x=method, y=100*rand)) +
+  geom_point(size=5) +
+  ylab('Rand Index') +
+   theme_clean(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank())
+
+ggsave('figures/rand_index.png', width = 10, height = 7)
+ggsave('figures/rand_index.pdf', width = 10, height = 7)
+
+knitr::kable(pdf)
+```
+
+## Alignment example - 1 million SARS-CoV-2 Genomes
 
 
 Data was downloaded from the ENA. The resulting sequences were then filtered out if they had over 10% missing sites and were aligned to the SARS-CoV-2 reference genome (MN908947.3) using MAFFT (v7.487).
@@ -81,22 +156,102 @@ mafft --6merpair --thread -1 --keeplength --addfragments filtered_SC2.fasta nCoV
 Mandrake was run using the command
 
 ```
-mandrake --cpus 60 --alignment MA_filt_SC2.fasta --output sc2million_v3 --kNN 50 --perplexity 15 --bInit 0 --maxIter 10000000000
+mandrake --use-gpu --alignment MA_filt_SC2.fasta --output sc2million --kNN 50 --perplexity 100 --bInit 0 --maxIter 1000000000000
 ```
 
 We can now generate a plot of the resulting embedding.
 
 ```{r}
-sc2_embedding <- fread("./data/sc2million.embedding.txt.gz") %>% as_tibble()
+sc2_embedding <- fread("./data/sc2million.embedding.txt.bz2") %>% as_tibble()
+sc2_names <- fread("./data/sc2million.names.txt.gz", sep='\t', header = FALSE) %>% as_tibble()
+sc2_lineages <- fread("./data/sc2_panglin_report.tsv.gz") %>% as_tibble()
+sc2_lineages <- sc2_lineages$lineage[match(sc2_names$V1, sc2_lineages$taxon)]
 
-palette(c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a"))
-plot(sc2_embedding$V1, sc2_embedding$V2, type = 'p', 
-     cex=0.01, cex.axis=1.5, font=1.5, #col=ppunk_clsts, 
-     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
+tb <- table(sc2_lineages)
+sort(tb[tb>10000])
+major <- names(tb)[tb>10000]
 
-jpeg('./figures/sc2_embedding.jpeg', width = 1200, height = 1000)
-plot(sc2_embedding$V1, sc2_embedding$V2, type = 'p', 
-     cex=0.01, cex.axis=1.5, font=1.5, #col=ppunk_clsts, 
-     xlab = "SCE DIM 1", ylab = "SCE DIM 2")
-dev.off()
+sc2_embedding$cluster <- sc2_lineages
+sc2_embedding$cluster[!sc2_embedding$cluster %in% major] <- 'other'
+
+sc2_embedding$cluster <- factor(sc2_embedding$cluster, 
+                                          levels = unique(sc2_embedding$cluster))
+
+temp_colours <- colours[-5]
+temp_colours[which(unique(sc2_embedding$cluster)=='other')] <- '#636363'
+
+ggplot(sc2_embedding, aes(x=V1, y=V2, colour=cluster)) + 
+  geom_point(alpha=0.5, size=0.1) +
+  scale_colour_manual(values=temp_colours, name='Lineage') +
+  theme_bw(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank()) +
+  guides(colour = guide_legend(override.aes = list(size=7))) +
+  xlab('SCE DIM 1') + ylab('SCE DIM 2')
+
+ggsave('./figures/sc2_embedding.png', width = 12, height = 7)
 ```
+
+## Sketch example - 616k Bacterial Genomes
+
+
+Genomes were downloaded from the collection described in Blackwell et al., 2021. The pairwise sketch distances were then calculated using sketchlib.
+
+```
+sed '1d' ~/Downloads/File4_QC_characterisation_661K.txt | cut -f 1,2 > 661k_species.txt
+
+sed 's/\/ebi\/ftp\/pub\/databases\/ENA2018-bacteria-661k\/Assemblies\///' sampleid_assembly_paths.txt > sample_rfile.txt
+
+sketchlib sketch -l sample_rfile.txt -o 661k --kmer 14 -s 1000 --cpus 32
+```
+
+Mandrake was then run using a GPU as
+
+```
+mandrake --sketches 661k.h5 --kNN 100 --perplexity 15 --cpus 60 --output 661k_mandrake --maxIter 100000000
+```
+
+We were then able to plot the resulting embedding with each point coloured by species.
+
+```{r}
+bac616k_embedding <- fread("./data/616k_v4.embedding.txt.bz2") %>% as_tibble()
+bac616k_names <- fread("./data/616k_mandrake.names.txt.gz", sep='\t', header = FALSE) %>% as_tibble()
+bac616k_species <- fread("./data/616k_species.txt.gz", header = FALSE) %>% as_tibble()
+bac616k_embedding$species <- bac616k_species$V2[match(bac616k_names$V1, bac616k_species$V1)]
+
+set.seed(1234)
+ggplot(bac616k_embedding, aes(x=V1, y=V2, colour=species)) + 
+  geom_point(alpha=0.5, size=0.1) +
+  scale_colour_manual(values=sample(colours, length(unique(bac616k_embedding$species)), replace = TRUE)) +
+  theme_bw(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank(),
+        legend.position = 'none') +
+  xlab('SCE DIM 1') + ylab('SCE DIM 2')
+
+ggsave('./figures/bac616k_embedding.png', width = 9, height = 7)
+
+
+
+tb <- table(bac616k_embedding$species)
+bac616k_embedding$major_species <- as.character(bac616k_embedding$species)
+bac616k_embedding$major_species[bac616k_embedding$major_species %in% names(tb)[tb<10000]] <- 'other'
+temp_colours <- c('#636363', colours)
+# temp_colours[which(unique(bac616k_embedding$major_species)=='other')] <- '#636363'
+
+bac616k_embedding$major_species <- factor(bac616k_embedding$major_species, 
+                                          levels = unique(bac616k_embedding$major_species))
+
+ggplot(bac616k_embedding, aes(x=V1, y=V2, colour=major_species)) + 
+  ggrastr::geom_point_rast(alpha=0.5, size=0.1) +
+  scale_colour_manual(values=temp_colours, name='Species') +
+  theme_bw(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank()) +
+  guides(colour = guide_legend(override.aes = list(size=7))) +
+  xlab('SCE DIM 1') + ylab('SCE DIM 2')
+
+ggsave('./figures/bac616k_embedding_major.png', width = 12, height = 7)
+ggsave('./figures/bac616k_embedding_major.pdf', width = 12, height = 7)
+```
+
