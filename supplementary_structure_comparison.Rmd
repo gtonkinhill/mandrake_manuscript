@@ -1,0 +1,307 @@
+---
+title: "Comparing different cluster structures"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries we are going to use.
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(dbscan)
+library(scales)
+library(ggthemes)
+library(ggtree)
+
+library(coala)
+activate_ms(priority = 2000)
+list_simulators()
+
+library(reticulate)
+np <- reticulate::import('numpy')
+
+pcadims <- 10
+
+colours <- c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a")
+set.seed(123)
+```
+
+Here we compare PCA, t-SNE and Mandrake on different population structures.
+
+### No structure
+
+We simulate datatsets with very large rates of recombination which breaks up the underlying population structure.
+
+```{r}
+model <- coala::coal_model(sample_size = 100, loci_number = 1, loci_length = 1000) +
+    feat_mutation(10) +
+    feat_recombination(1000) +
+    sumstat_seg_sites("segsites") +
+    sumstat_trees()
+ 
+simu.stats <- simulate(model)
+
+d <- dist(as.matrix(simu.stats$segsites[[1]])>0, method = 'binary')
+
+njt_high_recombination <- ape::bionj(d)
+plot(njt_high_recombination)
+
+d <- as.matrix(d)
+heatmap(d)
+
+#save to numpy format for Mandrake
+np$savez("./data/simulations/high_recombination.npz", 
+         I=matrix(rep(seq(0, nrow(d)-1), nrow(d)), nrow = nrow(d))[upper.tri(d)], 
+         J=matrix(rep(seq(0, nrow(d)-1), each=nrow(d)), nrow = nrow(d))[upper.tri(d)], 
+         dists=d[upper.tri(d)], 
+         names=paste('sample',1:nrow(d), sep='_'))
+```
+
+```
+mandrake --distances ./data/simulations/high_recombination.npz --output ./data/simulations/high_recombination --maxIter 1000000
+```
+
+```{r}
+mandrake_embedding_high_recombination <- fread("./data/simulations/high_recombination.embedding.txt") %>% as_tibble()
+
+pca_high_recombination <-irlba::prcomp_irlba(d, n=pcadims)
+
+plot(pca_high_recombination$x)
+
+tsne_embedding_high_recombination <- Rtsne::Rtsne(X = pca_high_recombination$x, 
+                  check_duplicates=FALSE,
+                  pca = FALSE,
+                  perplexity = 15)
+
+plot(tsne_embedding_high_recombination$Y)
+
+umap_embedding_high_recombination <- umap::umap(d = pca_high_recombination$x)
+
+plot(umap_embedding_high_recombination$layout)
+```
+
+
+### Clines
+
+```{r}
+ngenomes <- 200
+
+sim <- scrm::scrm(paste(c(ngenomes, ' 1 ', 
+  paste(paste('-eI', 1:ngenomes*0.1), '1 '),
+  ' -r 100 100 -t 1.5 -T'), collapse = ''))
+
+d <- dist(as.matrix(sim$seg_sites[[1]])>0, method = 'binary')
+
+njt_cline <- ape::bionj(d)
+plot(njt_cline)
+
+d <- as.matrix(d)
+heatmap(d)
+
+#save to numpy format for Mandrake
+np$savez("./data/simulations/cline.npz", 
+         I=matrix(rep(seq(0, nrow(d)-1), nrow(d)), nrow = nrow(d))[upper.tri(d)], 
+         J=matrix(rep(seq(0, nrow(d)-1), each=nrow(d)), nrow = nrow(d))[upper.tri(d)], 
+         dists=d[upper.tri(d)], 
+         names=paste('sample',1:nrow(d), sep='_'))
+```
+
+```
+mandrake --distances ./data/simulations/cline.npz --output ./data/simulations/cline --maxIter 1000000
+```
+
+```{r}
+mandrake_embedding_cline <- fread("./data/simulations/cline.embedding.txt") %>% as_tibble()
+
+plot(mandrake_embedding_cline)
+
+pca_cline <-irlba::prcomp_irlba(d, n=pcadims)
+
+plot(pca_cline$x)
+
+tsne_embedding_cline <- Rtsne::Rtsne(X = pca_cline$x, 
+                  check_duplicates=FALSE,
+                  pca = FALSE,
+                  perplexity = 15)
+
+plot(tsne_embedding_cline$Y)
+
+umap_embedding_cline <- umap::umap(d = pca_cline$x)
+
+plot(umap_embedding_cline$layout)
+```
+
+### Clades
+
+```{r}
+model <- coala::coal_model(sample_size = c(50, 50, 50, 50, 50), loci_number = 1, loci_length = 1000) +
+    feat_mutation(10) +
+    feat_recombination(10) +
+    feat_migration(rate = 1, symmetric = TRUE, time = 1) +
+    feat_migration(rate = 0, symmetric = TRUE, time = 0.1) +
+    sumstat_seg_sites("segsites") +
+    sumstat_trees()
+ 
+simu.stats <- simulate(model)
+
+d <- dist(as.matrix(simu.stats$segsites[[1]])>0, method = 'binary')
+
+njt_clade <- ape::bionj(d)
+plot(njt_clade)
+
+d <- (as.matrix(d)-mean(d))/max(d)
+heatmap(d)
+
+#save to numpy format for Mandrake
+np$savez("./data/simulations/clades.npz", 
+         I=matrix(rep(seq(0, nrow(d)-1), nrow(d)), nrow = nrow(d))[upper.tri(d)], 
+         J=matrix(rep(seq(0, nrow(d)-1), each=nrow(d)), nrow = nrow(d))[upper.tri(d)],
+         dists=d[upper.tri(d)], 
+         names=paste('sample',1:nrow(d), sep='_'))
+```
+
+```
+mandrake --distances ./data/simulations/clades.npz --output ./data/simulations/clades --maxIter 1000000
+```
+
+```{r}
+mandrake_embedding_clades <- fread("./data/simulations/clades.embedding.txt") %>% as_tibble()
+plot(mandrake_embedding_clades)
+
+pca_clades <-irlba::prcomp_irlba(d, n=pcadims)
+plot(pca_clades$x)
+
+tsne_embedding_clades <- Rtsne::Rtsne(X = pca_clades$x, 
+                  check_duplicates=FALSE,
+                  pca = FALSE,
+                  perplexity = 15)
+plot(tsne_embedding_clades$Y)
+
+umap_embedding_clades <- umap::umap(d = pca_clades$x)
+plot(umap_embedding_clades$layout)
+```
+
+
+### Variation at different resolutions
+
+Similar to two different plasmids with different gene contents
+
+```{r}
+model <- coala::coal_model(sample_size = c(50, 50, 50, 50, 50), loci_number = 1, loci_length = 1000) +
+    feat_mutation(10) +
+    feat_recombination(10) +
+    feat_migration(rate = 1, symmetric = TRUE, time = 1) +
+    feat_migration(rate = 0, symmetric = TRUE, time = 0.1) +
+    feat_growth(rate = 1000, population = 1, time = 0.05) +
+    feat_growth(rate = 1000, population = 2, time = 0.05) +
+    sumstat_seg_sites("segsites") +
+    sumstat_trees()
+ 
+simu.stats <- simulate(model)
+
+d <- dist(as.matrix(simu.stats$segsites[[1]])>0, method = 'binary')
+
+njt_clade <- ape::bionj(d)
+plot(njt_clade)
+
+d <- (as.matrix(d)-mean(d))/max(d)
+heatmap(d)
+
+#save to numpy format for Mandrake
+np$savez("./data/simulations/diff_res.npz", 
+         I=matrix(rep(seq(0, nrow(d)-1), nrow(d)), nrow = nrow(d))[upper.tri(d)], 
+         J=matrix(rep(seq(0, nrow(d)-1), each=nrow(d)), nrow = nrow(d))[upper.tri(d)],
+         dists=d[upper.tri(d)], 
+         names=paste('sample',1:nrow(d), sep='_'))
+```
+
+```
+mandrake --distances ./data/simulations/diff_res.npz --output ./data/simulations/diff_res --maxIter 1000000 --perplexity 50
+```
+
+```{r}
+mandrake_embedding_diff_res <- fread("./data/simulations/diff_res.embedding.txt") %>% as_tibble()
+plot(mandrake_embedding_diff_res)
+
+pca_diff_res <-irlba::prcomp_irlba(d, n=pcadims)
+plot(pca_diff_res$x)
+
+tsne_embedding_diff_res <- Rtsne::Rtsne(X = pca_diff_res$x, 
+                  check_duplicates=FALSE,
+                  pca = FALSE,
+                  perplexity = 50)
+plot(tsne_embedding_diff_res$Y)
+
+umap_embedding_diff_res <- umap::umap(d = pca_diff_res$x)
+plot(umap_embedding_diff_res$layout)
+```
+
+### Summary plots
+
+```{r}
+all_embeddings <- rbind(
+  rbind(
+    as.matrix(mandrake_embedding_clades),
+    as.matrix(pca_clades$x[,1:2]),
+    as.matrix(tsne_embedding_clades$Y),
+    as.matrix(umap_embedding_clades$layout)
+  ) %>% as_tibble() %>% 
+    add_column(sim='Five distinct clades') %>%
+    add_column(method=rep(c('Mandrake','PCA','tSNE','UMAP'), each=nrow(mandrake_embedding_clades))),
+  
+  rbind(
+    as.matrix(mandrake_embedding_high_recombination),
+    as.matrix(pca_high_recombination$x[,1:2]),
+    as.matrix(tsne_embedding_high_recombination$Y),
+    as.matrix(umap_embedding_high_recombination$layout)
+  ) %>% as_tibble() %>% 
+    add_column(sim='No structure (high recombination)') %>%
+    add_column(method=rep(c('Mandrake','PCA','tSNE','UMAP'), each=nrow(mandrake_embedding_high_recombination))),
+  
+  rbind(
+    as.matrix(mandrake_embedding_cline),
+    as.matrix(pca_cline$x[,1:2]),
+    as.matrix(tsne_embedding_cline$Y),
+    as.matrix(umap_embedding_cline$layout)
+  ) %>% as_tibble() %>% 
+    add_column(sim='Uniform sample times (cline)') %>%
+    add_column(method=rep(c('Mandrake','PCA','tSNE','UMAP'), each=nrow(mandrake_embedding_cline))),
+  
+  rbind(
+    as.matrix(mandrake_embedding_diff_res),
+    as.matrix(pca_diff_res$x[,1:2]),
+    as.matrix(tsne_embedding_diff_res$Y),
+    as.matrix(umap_embedding_diff_res$layout)
+  ) %>% as_tibble() %>% 
+    add_column(sim='Five clades with two different growth rates') %>%
+    add_column(method=rep(c('Mandrake','PCA','tSNE','UMAP'), each=nrow(mandrake_embedding_diff_res)))
+)
+
+
+pp <- imap(split(all_embeddings, all_embeddings$sim)[c(3,2,4,1)], ~{
+  ggplot(.x, aes(x=V1, y=V2, col=method)) +
+    geom_point() +
+    facet_wrap(~method, scales = 'free', nrow = 1) +
+    xlab('') + ylab('') +
+    theme_clean(base_size = 14) +
+    theme(plot.background = element_blank(),
+          legend.background = element_blank(),
+          legend.position = 'none') +
+    scale_color_brewer(type = 'qual', palette = 6) +
+    ggtitle(.y)
+})
+
+
+patchwork::wrap_plots(pp, ncol = 1, guides = 'collect') + patchwork::plot_annotation(tag_level = 'A')
+ggsave("./figures/simulation_embeddings.png", width = 12, height = 10)
+ggsave("./figures/simulation_embeddings.pdf", width = 12, height = 10)
+```
+
+
+

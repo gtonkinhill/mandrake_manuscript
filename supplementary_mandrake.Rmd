@@ -18,6 +18,9 @@ library(dbscan)
 library(scales)
 library(ggthemes)
 
+library(reticulate)
+skl <- reticulate::import('sklearn.metrics.cluster')
+
 colours <- c("#ff7f00","#cab2d6","#6a3d9a","#fdbf6f","#ffff99","#1f78b4","#b15928","#33a02c","#e31a1c","#a6cee3","#fb9a99","#b2df8a")
 ```
 
@@ -80,10 +83,11 @@ ggsave('./figures/gps_embedding_major_clusters_col.png', width = 9, height = 7)
 
 
 ```{r, eval=FALSE}
-cl <- hdbscan(gps_embedding, minPts = 10)
+cl <- hdbscan(gps_embedding[,c(1,2)], minPts = 10)
 clust <- cl$cluster
 clust[clust==0] <- max(clust) + 1:sum(clust==0)
-rand_mandrake <- fossil::rand.index(clust, ppunk_clsts)
+rand_mandrake <- fossil::rand.index(clust, ppunk_clsts$V2)
+ami_mandrake <- skl$adjusted_mutual_info_score(clust, ppunk_clsts$V2)
 
 #tSNE
 pa <- fread("./gene_presence_absence.Rtab") %>% as_tibble()
@@ -101,18 +105,21 @@ tsne_embedding <- Rtsne::Rtsne(X = pca$x,
 cl_pca <- hdbscan(pca$x[match(gpsnames$V1, names),1:2], minPts = 10)
 clust <- cl_pca$cluster
 clust[clust==0] <- max(clust) + 1:sum(clust==0)
-rand_pca <- fossil::rand.index(cl_pca$cluster, ppunk_clsts)
+rand_pca <- fossil::rand.index(cl_pca$cluster, ppunk_clsts$V2)
+ami_pca <- skl$adjusted_mutual_info_score(cl_pca$cluster, ppunk_clsts$V2)
 
 cl_tsne <- hdbscan(tsne_embedding$Y[match(gpsnames$V1, names),], minPts = 10)
 clust <- cl_tsne$cluster
 clust[clust==0] <- max(clust) + 1:sum(clust==0)
-rand_tsne <- fossil::rand.index(clust, ppunk_clsts)
+rand_tsne <- fossil::rand.index(clust, ppunk_clsts$V2)
+ami_tsne <- skl$adjusted_mutual_info_score(clust, ppunk_clsts$V2)
 
 umap_embedding <- umap::umap(d = pca$x[match(gpsnames$V1, names),])
 cl_umap <- hdbscan(umap_embedding$layout, minPts = 10)
 clust <- cl_umap$cluster
 clust[clust==0] <- max(clust) + 1:sum(clust==0)
-rand_umap <- fossil::rand.index(clust, ppunk_clsts)
+rand_umap <- fossil::rand.index(clust, ppunk_clsts$V2)
+ami_umap <- skl$adjusted_mutual_info_score(clust, ppunk_clsts$V2)
 
 pdf <- tibble(
   method=c('mandrake', 'umap', 'tsne', 'pca'),
@@ -128,6 +135,25 @@ ggplot(pdf, aes(x=method, y=100*rand)) +
 
 ggsave('figures/rand_index.png', width = 10, height = 7)
 ggsave('figures/rand_index.pdf', width = 10, height = 7)
+
+knitr::kable(pdf)
+```
+
+```{r}
+pdf <- tibble(
+  method=c('mandrake', 'umap', 'tsne', 'pca'),
+  rand=c(ami_mandrake, ami_umap, ami_tsne, ami_pca)
+)
+
+ggplot(pdf, aes(x=method, y=100*rand)) +
+  geom_point(size=5) +
+  ylab('Adusted Mutual Information') +
+   theme_clean(base_size = 20) +
+  theme(plot.background = element_blank(),
+        legend.background = element_blank())
+
+ggsave('figures/ami_index.png', width = 10, height = 7)
+ggsave('figures/ami_index.pdf', width = 10, height = 7)
 
 knitr::kable(pdf)
 ```
@@ -181,7 +207,7 @@ temp_colours <- colours[-5]
 temp_colours[which(unique(sc2_embedding$cluster)=='other')] <- '#636363'
 
 ggplot(sc2_embedding, aes(x=V1, y=V2, colour=cluster)) + 
-  geom_point(alpha=0.5, size=0.1) +
+  ggrastr::geom_point_rast(alpha=0.5, size=0.1) +
   scale_colour_manual(values=temp_colours, name='Lineage') +
   theme_bw(base_size = 20) +
   theme(plot.background = element_blank(),
@@ -190,6 +216,7 @@ ggplot(sc2_embedding, aes(x=V1, y=V2, colour=cluster)) +
   xlab('SCE DIM 1') + ylab('SCE DIM 2')
 
 ggsave('./figures/sc2_embedding.png', width = 12, height = 7)
+ggsave('./figures/sc2_embedding.pdf', width = 12, height = 7)
 ```
 
 ## Sketch example - 616k Bacterial Genomes
